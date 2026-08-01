@@ -12,8 +12,9 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "redis"
     REDIS_PORT: int = 6379
 
-    TELEGRAM_TOKEN: str = ""
-    TELEGRAM_CHANNEL: str = ""
+    TELEGRAM_BOT_TOKEN: str = ""
+    TELEGRAM_CHANNEL_ID: str = ""
+    
 
     LOG_LEVEL: str = "INFO"
 
