@@ -1,6 +1,17 @@
-version: "3.9"
-
 services:
+  app:
+    build: .
+    container_name: deal-app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_started
+      redis:
+        condition: service_started
+    env_file:
+      - .env
+    command: python -m app.bot
+
   postgres:
     image: postgres:16
     container_name: deal-postgres
