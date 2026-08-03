@@ -1,51 +1,92 @@
+from __future__ import annotations
+
+import re
+
 import requests
 from bs4 import BeautifulSoup
 
+from sources.base import BaseSource, Deal
 
-URL = "https://forum.donanimhaber.com/sicak-firsatlar--f193"
 
+class DonanimHaber(BaseSource):
 
-def get_deals():
-    headers = {
-        "User-Agent": (
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 Chrome/137.0 Safari/537.36"
-        )
+    name = "DonanimHaber"
+
+    URL = "https://forum.donanimhaber.com/sicak-firsatlar--f193"
+
+    HEADERS = {
+        "User-Agent":
+            "Mozilla/5.0"
     }
 
-    try:
-        response = requests.get(URL, headers=headers, timeout=20)
+    STORE_PATTERNS = {
+        "amazon": "Amazon",
+        "hepsiburada": "Hepsiburada",
+        "trendyol": "Trendyol",
+        "n11": "N11",
+        "mediamarkt": "MediaMarkt",
+        "teknosa": "Teknosa",
+        "pazarama": "Pazarama",
+    }
+
+    def get_deals(self) -> list[Deal]:
+
+        response = requests.get(
+            self.URL,
+            headers=self.HEADERS,
+            timeout=20,
+        )
+
         response.raise_for_status()
 
-        soup = BeautifulSoup(response.text, "html.parser")
+        soup = BeautifulSoup(
+            response.text,
+            "html.parser",
+        )
 
-        deals = []
+        deals: list[Deal] = []
 
-        for a in soup.select("a")[:300]:
-            title = a.get_text(strip=True)
-            href = a.get("href")
+        links = soup.find_all("a", href=True)
 
-            if not title or len(title) < 20:
+        for a in links:
+
+            href = a["href"]
+
+            if not href.startswith("http"):
                 continue
 
-            if not href:
-                continue
+            retailer = None
 
-            if href.startswith("/"):
-                href = "https://forum.donanimhaber.com" + href
+            for key, value in self.STORE_PATTERNS.items():
+
+                if key in href.lower():
+                    retailer = value
+                    break
+
+            if retailer is None:
+                continue
 
             deals.append(
-                {
-                    "title": title,
-                    "url": href,
-                }
+                Deal(
+                    title="",
+                    product_url=href,
+                    retailer=retailer,
+                    price=0,
+                    discovery_source="DonanimHaber",
+                )
             )
 
-            if len(deals) >= 10:
-                break
+        unique = []
 
-        return deals
+        seen = set()
 
-    except Exception as e:
-        print(e)
-        return []
+        for deal in deals:
+
+            if deal.product_url in seen:
+                continue
+
+            seen.add(deal.product_url)
+
+            unique.append(deal)
+
+        return unique
