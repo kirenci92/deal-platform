@@ -1,49 +1,76 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from services.rules import rules
+from services.scoring import ScoringService
 from sources.base import Deal
 
 
+@dataclass(slots=True)
 class ValidationResult:
-    def __init__(self, valid: bool, reason: str = ""):
-        self.valid = valid
-        self.reason = reason
+    valid: bool
+    score: int
+    reasons: list[str]
 
 
 class Validator:
 
-    MIN_DISCOUNT = 10
+    @staticmethod
+    def validate(deal: Deal) -> ValidationResult:
 
-    @classmethod
-    def validate(cls, deal: Deal) -> ValidationResult:
+        reasons: list[str] = []
 
         if not deal.product_url:
-            return ValidationResult(False, "Ürün linki yok.")
+            return ValidationResult(
+                False,
+                0,
+                ["Ürün linki bulunamadı."]
+            )
 
-        if not deal.title:
-            return ValidationResult(False, "Ürün adı yok.")
+        if rules.require_product_name and not deal.title:
+            return ValidationResult(
+                False,
+                0,
+                ["Ürün adı bulunamadı."]
+            )
 
         if deal.price <= 0:
-            return ValidationResult(False, "Geçersiz fiyat.")
-
-        if not deal.in_stock:
-            return ValidationResult(False, "Stokta yok.")
-
-        if (
-            deal.old_price
-            and deal.old_price <= deal.price
-        ):
             return ValidationResult(
                 False,
-                "Eski fiyat güncel fiyattan düşük."
+                0,
+                ["Geçersiz fiyat."]
+            )
+
+        if rules.require_stock and not deal.in_stock:
+            return ValidationResult(
+                False,
+                0,
+                ["Stokta yok."]
             )
 
         if (
-            deal.discount is not None
-            and deal.discount < cls.MIN_DISCOUNT
+            deal.stock_count is not None
+            and deal.stock_count < rules.minimum_stock
         ):
             return ValidationResult(
                 False,
-                f"İndirim %{cls.MIN_DISCOUNT} altında."
+                0,
+                [f"Stok {rules.minimum_stock} adetten az."]
             )
 
-        return ValidationResult(True)
+        score = ScoringService.calculate(deal)
+
+        if score.score < rules.minimum_score:
+
+            return ValidationResult(
+                False,
+                score.score,
+                score.reasons,
+            )
+
+        return ValidationResult(
+            True,
+            score.score,
+            score.reasons,
+        )
