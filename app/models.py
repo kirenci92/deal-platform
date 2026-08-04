@@ -85,6 +85,26 @@ class Deal(Base):
         default=True,
     )
 
+    prime: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+    )
+
+    score: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+    )
+
+    event_type: Mapped[str | None] = mapped_column(
+        String(50),
+        nullable=True,
+    )
+
+    event_value: Mapped[float | None] = mapped_column(
+        Float,
+        nullable=True,
+    )
+
     stock_count: Mapped[int | None] = mapped_column(
         Integer,
         nullable=True,
