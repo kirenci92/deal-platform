@@ -1,11 +1,9 @@
-import re
-from typing import Iterable
-from urllib.parse import urljoin
-
 import requests
 from bs4 import BeautifulSoup
+from urllib.parse import urljoin
 
 from services.discovery.base import Discovery
+from services.discovery.url_filter import filter_urls
 
 
 USER_AGENT = (
@@ -15,19 +13,13 @@ USER_AGENT = (
     "Chrome/139.0.0.0 Safari/537.36"
 )
 
-# Discovery sadece buralardan başlar.
-# Daha sonra yeni kaynaklar buraya eklenecek.
+
 SEED_URLS = [
     "https://www.hepsiburada.com/",
     "https://www.hepsiburada.com/kampanyalar",
     "https://www.hepsiburada.com/cok-satanlar",
     "https://www.hepsiburada.com/yeni-gelen-urunler",
 ]
-
-PRODUCT_RE = re.compile(
-    r"https://www\.hepsiburada\.com/.+-p-[A-Za-z0-9]+/?$",
-    re.IGNORECASE,
-)
 
 
 class HepsiburadaDiscovery(Discovery):
@@ -36,7 +28,7 @@ class HepsiburadaDiscovery(Discovery):
     def store(self):
         return "hepsiburada"
 
-    def discover(self) -> Iterable[str]:
+    def discover(self):
 
         session = requests.Session()
 
@@ -44,7 +36,7 @@ class HepsiburadaDiscovery(Discovery):
             "User-Agent": USER_AGENT,
         })
 
-        discovered = set()
+        urls = []
 
         for seed in SEED_URLS:
 
@@ -59,9 +51,9 @@ class HepsiburadaDiscovery(Discovery):
 
                 response.raise_for_status()
 
-            except Exception as e:
+            except Exception as exc:
 
-                print(e)
+                print(exc)
 
                 continue
 
@@ -71,11 +63,10 @@ class HepsiburadaDiscovery(Discovery):
 
                 href = urljoin(seed, a["href"])
 
-                href = href.split("?")[0]
+                urls.append(href)
 
-                href = href.rstrip("/")
+        urls = filter_urls(urls)
 
-                if PRODUCT_RE.match(href):
-                    discovered.add(href)
+        print(f"[DISCOVERY] {len(urls)} ürün URL'si bulundu")
 
-        return sorted(discovered)
+        return urls
