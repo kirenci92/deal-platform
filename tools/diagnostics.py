@@ -1,119 +1,72 @@
-from __future__ import annotations
+def analyze_diagnostics(report):
 
-import json
-import sys
-from urllib.parse import urlparse
+    report.notes = []
 
-from filesystem import FileSystem
-from http import HttpClient
-from parser import PageParser
-from reporter import ReportBuilder
+    html = (
+        getattr(report, "rendered_html", "")
+        or getattr(report, "html", "")
+    ).lower()
 
+    scripts = " ".join(report.scripts).lower()
 
-def detect_source(url: str) -> str:
-    host = urlparse(url).netloc.lower()
+    # Render Type
+    if report.json_ld:
+        report.render = "ssr"
+    elif "__next" in html or "__nuxt" in html:
+        report.render = "csr"
+    else:
+        report.render = "unknown"
 
-    host = host.replace("www.", "")
+    # Framework
+    if "__next" in html:
+        report.framework = "nextjs"
+    elif "__nuxt" in html:
+        report.framework = "nuxt"
+    elif "react" in scripts:
+        report.framework = "react"
+    elif "vue" in scripts:
+        report.framework = "vue"
 
-    return host.replace(".", "_")
+    # Anti Bot
+    report.anti_bot = []
 
-
-def main():
-
-    if len(sys.argv) != 2:
-        print("Usage:")
-        print("python tools/diagnostics.py <URL>")
-        return
-
-    url = sys.argv[1]
-
-    source = detect_source(url)
-
-    fs = FileSystem()
-
-    session = fs.create_session(source)
-
-    client = HttpClient()
-
-    response = client.get(url)
-
-    if response is None:
-        print("Request failed.")
-        return
-
-    html = response.text
-
-    fs.save_html(session, html)
-
-    fs.save_json(
-        session,
-        "headers.json",
-        dict(response.headers),
-    )
-
-    parser = PageParser(html)
-
-    jsonld = parser.json_ld()
-
-    for index, item in enumerate(jsonld, start=1):
-
-        fs.save_json(
-            session,
-            f"jsonld_{index}.json",
-            item,
-        )
-
-    meta = {
-        "url": response.url,
-        "status": response.status_code,
-        "title": parser.title(),
-        "canonical": parser.canonical(),
-        "description": parser.meta("description"),
-        "og:title": parser.meta("og:title"),
-        "og:image": parser.meta("og:image"),
-        "og:type": parser.meta("og:type"),
-        "price": parser.first_price(),
+    keywords = {
+        "akamai": "akamai",
+        "cloudflare": "cloudflare",
+        "perimeterx": "perimeterx",
+        "datadome": "datadome",
     }
 
-    fs.save_json(
-        session,
-        "meta.json",
-        meta,
-    )
+    for key, value in keywords.items():
+        if key in html or key in scripts:
+            report.anti_bot.append(value)
 
-    report = ReportBuilder()
+    # Önerilen strateji
+    if report.anti_bot:
+        report.recommended_strategy = "playwright"
+    elif report.render == "csr":
+        report.recommended_strategy = "playwright"
+    else:
+        report.recommended_strategy = "requests"
 
-    report.add("URL", meta["url"])
+    # Güven puanı
+    score = 0
 
-    report.add("STATUS", meta["status"])
+    if report.json_ld:
+        score += 30
 
-    report.add("TITLE", meta["title"])
+    if report.meta:
+        score += 20
 
-    report.add("CANONICAL", meta["canonical"])
+    if report.scripts:
+        score += 10
 
-    report.add("DESCRIPTION", meta["description"])
+    if report.framework:
+        score += 20
 
-    report.add("OG TITLE", meta["og:title"])
+    if report.render != "unknown":
+        score += 20
 
-    report.add("OG IMAGE", meta["og:image"])
+    report.confidence = min(score, 100)
 
-    report.add("PRICE", meta["price"])
-
-    report.add(
-        "JSON-LD COUNT",
-        len(jsonld),
-    )
-
-    report.add_jsonld_summary(jsonld)
-
-    report.save(session)
-
-    print()
-
-    print("Diagnostics completed.")
-
-    print(session)
-
-
-if __name__ == "__main__":
-    main()
+    return report
