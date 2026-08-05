@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from urllib.parse import urljoin
 
 from services.discovery.base import Discovery
+from services.discovery.seed_manager import SeedManager
 from services.discovery.url_filter import filter_urls
 from services.discovery.playwright_discovery import PlaywrightDiscovery
 
@@ -15,72 +16,82 @@ USER_AGENT = (
 )
 
 
-SEED_URLS = [
-    "https://www.hepsiburada.com/",
-    "https://www.hepsiburada.com/kampanyalar",
-    "https://www.hepsiburada.com/cok-satanlar",
-    "https://www.hepsiburada.com/yeni-gelen-urunler",
-]
-
-
 class HepsiburadaDiscovery(Discovery):
 
     @property
     def store(self):
         return "hepsiburada"
 
-    def discover(self):
+    def __init__(self):
 
-        session = requests.Session()
+        self.session = requests.Session()
 
-        session.headers.update({
+        self.session.headers.update({
             "User-Agent": USER_AGENT,
         })
 
-        playwright = PlaywrightDiscovery(USER_AGENT)
+        self.playwright = PlaywrightDiscovery(
+            user_agent=USER_AGENT
+        )
+
+    def _requests_discover(self, url):
+
+        links = []
+
+        response = self.session.get(
+            url,
+            timeout=30,
+        )
+
+        response.raise_for_status()
+
+        soup = BeautifulSoup(
+            response.text,
+            "lxml"
+        )
+
+        for a in soup.find_all("a", href=True):
+
+            href = urljoin(
+                url,
+                a["href"]
+            )
+
+            links.append(href)
+
+        return filter_urls(links)
+
+    def discover(self):
 
         discovered = set()
 
-        for seed in SEED_URLS:
+        for seed in SeedManager.get(self.store):
 
             print(f"[DISCOVERY] {seed}")
 
-            urls = []
-
-            # Hızlı tarama
             try:
 
-                response = session.get(
-                    seed,
-                    timeout=30,
-                )
-
-                response.raise_for_status()
-
-                soup = BeautifulSoup(response.text, "lxml")
-
-                for a in soup.find_all("a", href=True):
-
-                    href = urljoin(seed, a["href"])
-
-                    urls.append(href)
+                urls = self._requests_discover(seed)
 
             except Exception as exc:
 
                 print(exc)
 
-            urls = filter_urls(urls)
+                urls = []
 
-            # Yetersizse Playwright
+            # Requests yeterliyse Playwright çalıştırma
             if len(urls) < 20:
 
                 print("[DISCOVERY] Playwright fallback")
 
                 try:
+
                     urls.extend(
-                        playwright.discover(seed)
+                        self.playwright.discover(seed)
                     )
+
                 except Exception as exc:
+
                     print(exc)
 
             discovered.update(
