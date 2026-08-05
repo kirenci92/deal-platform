@@ -1,64 +1,38 @@
 from dataclasses import dataclass, field, asdict
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
 class ProductSelectors:
+    container: Optional[str] = None
     title: Optional[str] = None
     price: Optional[str] = None
     old_price: Optional[str] = None
     image: Optional[str] = None
     link: Optional[str] = None
-    rating: Optional[str] = None
-    reviews: Optional[str] = None
-
-
-@dataclass
-class ListingSelectors:
-    container: Optional[str] = None
-    item: Optional[str] = None
-    next_page: Optional[str] = None
-
-
-@dataclass
-class ApiEndpoint:
-    url: str
-    method: str = "GET"
-    content_type: Optional[str] = None
 
 
 @dataclass
 class AnalysisReport:
-
-    site: str
-
-    homepage: str
+    store: str
+    url: str
 
     render: str = "unknown"
-
     framework: Optional[str] = None
 
-    anti_bot: List[str] = field(default_factory=list)
+    html_path: Optional[str] = None
+    screenshot_path: Optional[str] = None
 
-    json_ld: bool = False
+    headers: Dict[str, str] = field(default_factory=dict)
+    meta: Dict[str, str] = field(default_factory=dict)
 
-    listing: ListingSelectors = field(default_factory=ListingSelectors)
-
-    product: ProductSelectors = field(default_factory=ProductSelectors)
-
-    api: List[ApiEndpoint] = field(default_factory=list)
-
-    xhr: List[str] = field(default_factory=list)
-
-    cookies: List[str] = field(default_factory=list)
+    json_ld: List[Any] = field(default_factory=list)
 
     scripts: List[str] = field(default_factory=list)
 
-    headers: Dict[str, str] = field(default_factory=dict)
+    network: List[Dict[str, Any]] = field(default_factory=list)
 
-    difficulty: int = 1
-
-    recommended_strategy: str = "requests"
+    selectors: ProductSelectors = field(default_factory=ProductSelectors)
 
     notes: List[str] = field(default_factory=list)
 
