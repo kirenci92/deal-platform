@@ -1,63 +1,54 @@
-from __future__ import annotations
-
+import json
+import re
 from pathlib import Path
 
 
-class ReportBuilder:
-    def __init__(self):
-        self.lines: list[str] = []
+def _safe_name(url: str) -> str:
+    value = re.sub(r"^https?://", "", url)
+    value = re.sub(r"[^a-zA-Z0-9]+", "_", value)
+    return value.strip("_")[:120]
 
-    def add(self, title: str, value) -> None:
-        self.lines.append(f"## {title}")
 
-        if value is None:
-            value = "-"
+def save_report(report):
 
-        self.lines.append(str(value))
-        self.lines.append("")
+    report_id = _safe_name(report.url)
 
-    def add_list(self, title: str, values: list) -> None:
-        self.lines.append(f"## {title}")
+    output = (
+        Path("analysis")
+        / report.store
+        / report_id
+    )
 
-        if not values:
-            self.lines.append("-")
-        else:
-            for item in values:
-                self.lines.append(f"- {item}")
+    output.mkdir(parents=True, exist_ok=True)
 
-        self.lines.append("")
-
-    def add_jsonld_summary(self, jsonld: list[dict]) -> None:
-        self.lines.append("## JSON-LD")
-
-        if not jsonld:
-            self.lines.append("-")
-            self.lines.append("")
-            return
-
-        for index, item in enumerate(jsonld, start=1):
-
-            item_type = item.get("@type", "Unknown")
-
-            self.lines.append(
-                f"- #{index}: {item_type}"
-            )
-
-        self.lines.append("")
-
-    def build(self) -> str:
-        return "\n".join(self.lines)
-
-    def save(
-        self,
-        directory: Path,
-    ) -> Path:
-
-        report = directory / "report.md"
-
-        report.write_text(
-            self.build(),
-            encoding="utf-8",
+    if getattr(report, "html", None):
+        (output / "page.html").write_text(
+            report.html,
+            encoding="utf-8"
         )
 
-        return report
+    if getattr(report, "rendered_html", None):
+        (output / "rendered.html").write_text(
+            report.rendered_html,
+            encoding="utf-8"
+        )
+
+    with open(output / "headers.json", "w", encoding="utf-8") as f:
+        json.dump(report.headers, f, indent=2, ensure_ascii=False)
+
+    with open(output / "meta.json", "w", encoding="utf-8") as f:
+        json.dump(report.meta, f, indent=2, ensure_ascii=False)
+
+    with open(output / "jsonld.json", "w", encoding="utf-8") as f:
+        json.dump(report.json_ld, f, indent=2, ensure_ascii=False)
+
+    with open(output / "scripts.json", "w", encoding="utf-8") as f:
+        json.dump(report.scripts, f, indent=2, ensure_ascii=False)
+
+    with open(output / "report.json", "w", encoding="utf-8") as f:
+        json.dump(
+            report.to_dict(),
+            f,
+            indent=2,
+            ensure_ascii=False
+        )
