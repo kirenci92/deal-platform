@@ -12,18 +12,20 @@ USER_AGENT = (
     "Mozilla/5.0 (X11; Linux x86_64) "
     "AppleWebKit/537.36 "
     "(KHTML, like Gecko) "
-    "Chrome/139.0 Safari/537.36"
+    "Chrome/139.0.0.0 Safari/537.36"
 )
 
-
+# Discovery sadece buralardan başlar.
+# Daha sonra yeni kaynaklar buraya eklenecek.
 SEED_URLS = [
-    "https://www.hepsiburada.com/kampanyalar",
     "https://www.hepsiburada.com/",
+    "https://www.hepsiburada.com/kampanyalar",
+    "https://www.hepsiburada.com/cok-satanlar",
+    "https://www.hepsiburada.com/yeni-gelen-urunler",
 ]
 
-
-PRODUCT_PATTERN = re.compile(
-    r"^https://www\.hepsiburada\.com/.+-p-[A-Z0-9]+/?$",
+PRODUCT_RE = re.compile(
+    r"https://www\.hepsiburada\.com/.+-p-[A-Za-z0-9]+/?$",
     re.IGNORECASE,
 )
 
@@ -31,12 +33,10 @@ PRODUCT_PATTERN = re.compile(
 class HepsiburadaDiscovery(Discovery):
 
     @property
-    def store(self) -> str:
+    def store(self):
         return "hepsiburada"
 
     def discover(self) -> Iterable[str]:
-
-        found = set()
 
         session = requests.Session()
 
@@ -44,9 +44,14 @@ class HepsiburadaDiscovery(Discovery):
             "User-Agent": USER_AGENT,
         })
 
+        discovered = set()
+
         for seed in SEED_URLS:
 
+            print(f"[DISCOVERY] {seed}")
+
             try:
+
                 response = session.get(
                     seed,
                     timeout=30,
@@ -54,18 +59,23 @@ class HepsiburadaDiscovery(Discovery):
 
                 response.raise_for_status()
 
-            except Exception:
+            except Exception as e:
+
+                print(e)
+
                 continue
 
             soup = BeautifulSoup(response.text, "lxml")
 
-            for link in soup.find_all("a", href=True):
+            for a in soup.find_all("a", href=True):
 
-                href = urljoin(seed, link["href"])
+                href = urljoin(seed, a["href"])
 
                 href = href.split("?")[0]
 
-                if PRODUCT_PATTERN.match(href):
-                    found.add(href.rstrip("/"))
+                href = href.rstrip("/")
 
-        return sorted(found)
+                if PRODUCT_RE.match(href):
+                    discovered.add(href)
+
+        return sorted(discovered)
