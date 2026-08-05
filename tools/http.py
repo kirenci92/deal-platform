@@ -1,80 +1,62 @@
-import random
-import time
-from typing import Optional
-
 import requests
+from bs4 import BeautifulSoup
 
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0 Safari/537.36",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0 Safari/537.36",
-]
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/139.0 Safari/537.36"
+    )
+}
 
 
-class HttpClient:
-    def __init__(
-        self,
-        timeout: int = 30,
-        retries: int = 3,
-    ):
-        self.timeout = timeout
-        self.retries = retries
+def analyze_http(report):
 
-        self.session = requests.Session()
+    response = requests.get(
+        report.url,
+        headers=DEFAULT_HEADERS,
+        timeout=30,
+        allow_redirects=True,
+    )
 
-    def _headers(self) -> dict:
-        return {
-            "User-Agent": random.choice(USER_AGENTS),
-            "Accept": (
-                "text/html,"
-                "application/xhtml+xml,"
-                "application/xml;q=0.9,"
-                "image/avif,"
-                "image/webp,"
-                "*/*;q=0.8"
-            ),
-            "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
-            "Accept-Encoding": "gzip, deflate, br",
-            "Connection": "keep-alive",
-            "Upgrade-Insecure-Requests": "1",
-            "Cache-Control": "no-cache",
-        }
+    response.raise_for_status()
 
-    def get(self, url: str) -> Optional[requests.Response]:
+    report.status_code = response.status_code
 
-        last_error = None
+    report.final_url = response.url
 
-        for attempt in range(self.retries):
+    report.headers = dict(response.headers)
 
-            try:
+    report.cookies = {
+        cookie.name: cookie.value
+        for cookie in response.cookies
+    }
 
-                response = self.session.get(
-                    url,
-                    headers=self._headers(),
-                    timeout=self.timeout,
-                    allow_redirects=True,
-                )
+    report.html = response.text
 
-                response.raise_for_status()
+    soup = BeautifulSoup(response.text, "lxml")
 
-                return response
+    report.meta = {}
 
-            except Exception as e:
+    for meta in soup.find_all("meta"):
 
-                last_error = e
+        key = (
+            meta.get("name")
+            or meta.get("property")
+            or meta.get("http-equiv")
+        )
 
-                time.sleep(2)
+        value = meta.get("content")
 
-        print(last_error)
+        if key and value:
+            report.meta[key] = value
 
-        return None
+    report.title = (
+        soup.title.string.strip()
+        if soup.title and soup.title.string
+        else None
+    )
 
-    def html(self, url: str) -> Optional[str]:
-
-        response = self.get(url)
-
-        if response is None:
-            return None
-
-        return response.text
+    return report
