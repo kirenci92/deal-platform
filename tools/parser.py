@@ -2,14 +2,13 @@ import re
 from bs4 import BeautifulSoup
 
 
-PRICE_PATTERN = re.compile(r"(₺|TL|TRY|\d+[.,]\d{2})", re.IGNORECASE)
+PRICE_RE = re.compile(r"(\d[\d\.\,]*)\s*(₺|TL|TRY)", re.IGNORECASE)
 
 
-def _text(tag):
-    if not tag:
+def _text(node):
+    if not node:
         return ""
-
-    return " ".join(tag.get_text(" ", strip=True).split())
+    return " ".join(node.get_text(" ", strip=True).split())
 
 
 def _score(node):
@@ -17,10 +16,9 @@ def _score(node):
     score = 0
 
     text = _text(node)
-
     html = str(node).lower()
 
-    if PRICE_PATTERN.search(text):
+    if PRICE_RE.search(text):
         score += 30
 
     if node.find("img"):
@@ -29,53 +27,69 @@ def _score(node):
     if node.find("a", href=True):
         score += 20
 
-    if len(node.find_all()) >= 5:
-        score += 10
-
     if "product" in html:
-        score += 10
+        score += 15
 
     if "price" in html:
-        score += 10
+        score += 15
 
     return score
 
 
 def analyze_dom(report):
 
-    html = getattr(report, "rendered_html", None)
-
-    if not html:
-        html = getattr(report, "html", "")
+    html = getattr(report, "rendered_html", None) or getattr(report, "html", "")
 
     soup = BeautifulSoup(html, "lxml")
 
-    report.selector_candidates = []
+    candidates = []
 
-    candidates = soup.find_all(["article", "li", "div"])
-
-    scored = []
-
-    for node in candidates:
+    for node in soup.find_all(["article", "div", "li"]):
 
         score = _score(node)
 
-        if score < 40:
-            continue
+        if score >= 40:
+            candidates.append((score, node))
 
-        scored.append((score, node))
+    candidates.sort(key=lambda x: x[0], reverse=True)
 
-    scored.sort(key=lambda x: x[0], reverse=True)
+    report.selector_candidates = []
 
-    for score, node in scored[:20]:
+    if not candidates:
+        return report
 
-        report.selector_candidates.append(
-            {
-                "tag": node.name,
-                "class": node.get("class", []),
-                "id": node.get("id"),
-                "score": score,
-            }
-        )
+    best = candidates[0][1]
+
+    report.selector_candidates = [
+        {
+            "tag": n.name,
+            "class": n.get("class", []),
+            "id": n.get("id"),
+            "score": s,
+        }
+        for s, n in candidates[:20]
+    ]
+
+    title = ""
+
+    for tag in best.find_all(["h1", "h2", "h3", "span", "a"]):
+
+        value = _text(tag)
+
+        if len(value) > len(title):
+            title = value
+
+    image = best.find("img")
+
+    link = best.find("a", href=True)
+
+    prices = PRICE_RE.findall(_text(best))
+
+    report.product_candidate = {
+        "title": title,
+        "price": prices[0][0] if prices else None,
+        "image": image.get("src") if image else None,
+        "link": link.get("href") if link else None,
+    }
 
     return report
