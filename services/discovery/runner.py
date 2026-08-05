@@ -1,5 +1,6 @@
 from services.discovery.hepsiburada import HepsiburadaDiscovery
 from services.discovery.queue import DiscoveryQueue
+from tools.analyze import AnatomyAnalyzer
 
 
 class DiscoveryRunner:
@@ -16,7 +17,7 @@ class DiscoveryRunner:
 
         for discovery in self.discoveries:
 
-            print(f"\n[{discovery.store.upper()}] Discovery başladı")
+            print(f"\n[{discovery.store.upper()}] Discovery")
 
             urls = discovery.discover()
 
@@ -24,26 +25,24 @@ class DiscoveryRunner:
 
             print(f"Yeni URL : {added}")
 
-    def next_url(self):
+    def process(self):
 
-        return self.queue.pop()
+        while not self.queue.empty():
 
-    def has_work(self):
+            url = self.queue.pop()
 
-        return not self.queue.empty()
+            print(f"\n[ANALYZER] {url}")
+
+            AnatomyAnalyzer(
+                store="hepsiburada",
+                url=url,
+            ).run()
 
     def run(self):
 
         self.discover()
 
-        while self.has_work():
-
-            url = self.next_url()
-
-            print(f"Analyzer Queue -> {url}")
-
-            # Sonraki adımda:
-            # AnatomyAnalyzer(...).run()
+        self.process()
 
 
 if __name__ == "__main__":
