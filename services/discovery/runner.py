@@ -1,41 +1,51 @@
-from typing import Dict, List
-
 from services.discovery.hepsiburada import HepsiburadaDiscovery
+from services.discovery.queue import DiscoveryQueue
 
 
 class DiscoveryRunner:
 
     def __init__(self):
 
+        self.queue = DiscoveryQueue()
+
         self.discoveries = [
             HepsiburadaDiscovery(),
         ]
 
-    def run(self) -> Dict[str, List[str]]:
-
-        result = {}
+    def discover(self):
 
         for discovery in self.discoveries:
 
-            print(f"[DISCOVERY] {discovery.store}")
+            print(f"\n[{discovery.store.upper()}] Discovery başladı")
 
-            urls = list(discovery.discover())
+            urls = discovery.discover()
 
-            urls = sorted(set(urls))
+            added = self.queue.extend(urls)
 
-            result[discovery.store] = urls
+            print(f"Yeni URL : {added}")
 
-            print(f"  {len(urls)} URL bulundu")
+    def next_url(self):
 
-        return result
+        return self.queue.pop()
+
+    def has_work(self):
+
+        return not self.queue.empty()
+
+    def run(self):
+
+        self.discover()
+
+        while self.has_work():
+
+            url = self.next_url()
+
+            print(f"Analyzer Queue -> {url}")
+
+            # Sonraki adımda:
+            # AnatomyAnalyzer(...).run()
 
 
 if __name__ == "__main__":
 
-    runner = DiscoveryRunner()
-
-    data = runner.run()
-
-    total = sum(len(v) for v in data.values())
-
-    print(f"\nToplam {total} ürün URL'si bulundu.")
+    DiscoveryRunner().run()
