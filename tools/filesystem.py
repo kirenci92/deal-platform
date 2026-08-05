@@ -1,64 +1,36 @@
-from __future__ import annotations
-
-import json
 from datetime import datetime
 from pathlib import Path
+import hashlib
 
 
-class FileSystem:
-    def __init__(self, base_dir: str = "analysis"):
-        self.base_dir = Path(base_dir)
+class AnalysisWorkspace:
 
-    def create_session(self, source: str) -> Path:
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    def __init__(self, root="analysis"):
+        self.root = Path(root)
 
-        session_dir = self.base_dir / source / timestamp
-        session_dir.mkdir(parents=True, exist_ok=True)
+    def create(self, store: str, url: str):
 
-        return session_dir
+        url_hash = hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
 
-    def save_html(self, directory: Path, html: str) -> Path:
-        path = directory / "page.html"
+        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
 
-        path.write_text(
-            html,
-            encoding="utf-8",
+        directory = (
+            self.root
+            / store
+            / f"{timestamp}_{url_hash}"
         )
 
-        return path
+        directory.mkdir(parents=True, exist_ok=True)
 
-    def save_json(
-        self,
-        directory: Path,
-        filename: str,
-        data: dict,
-    ) -> Path:
-
-        path = directory / filename
-
-        path.write_text(
-            json.dumps(
-                data,
-                indent=4,
-                ensure_ascii=False,
-            ),
-            encoding="utf-8",
-        )
-
-        return path
-
-    def save_text(
-        self,
-        directory: Path,
-        filename: str,
-        text: str,
-    ) -> Path:
-
-        path = directory / filename
-
-        path.write_text(
-            text,
-            encoding="utf-8",
-        )
-
-        return path
+        return {
+            "root": directory,
+            "report": directory / "report.json",
+            "html": directory / "page.html",
+            "rendered_html": directory / "rendered.html",
+            "headers": directory / "headers.json",
+            "meta": directory / "meta.json",
+            "jsonld": directory / "jsonld.json",
+            "scripts": directory / "scripts.json",
+            "network": directory / "network.json",
+            "screenshot": directory / "screenshot.png",
+        }
