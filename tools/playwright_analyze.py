@@ -1,148 +1,52 @@
-from __future__ import annotations
-
-import argparse
-import json
-from datetime import datetime
 from pathlib import Path
-from urllib.parse import urlparse
-
-from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright
 
 
-class PlaywrightAnalyzer:
+def analyze_playwright(report):
 
-    def __init__(self, url: str):
+    output_dir = (
+        Path("analysis")
+        / report.store
+        / "temp"
+    )
 
-        self.url = url
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-        self.output = (
-            Path("analysis")
-            / urlparse(url).netloc.replace("www.", "").replace(".", "_")
-            / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    screenshot_path = output_dir / "screenshot.png"
+    html_path = output_dir / "page.html"
+
+    with sync_playwright() as p:
+
+        browser = p.chromium.launch(
+            headless=True
         )
 
-        self.output.mkdir(
-            parents=True,
-            exist_ok=True,
+        page = browser.new_page()
+
+        page.goto(
+            report.url,
+            wait_until="networkidle",
+            timeout=60000
         )
 
-    def run(self):
+        page.screenshot(
+            path=str(screenshot_path),
+            full_page=True
+        )
 
-        with sync_playwright() as p:
+        html = page.content()
 
-            browser = p.chromium.launch(
-                headless=True,
-            )
+        html_path.write_text(
+            html,
+            encoding="utf-8"
+        )
 
-            page = browser.new_page()
+        report.rendered_html = html
 
-            page.goto(
-                self.url,
-                wait_until="networkidle",
-                timeout=60000,
-            )
+        report.html_path = str(html_path)
 
-            html = page.content()
+        report.screenshot_path = str(screenshot_path)
 
-            (self.output / "page.html").write_text(
-                html,
-                encoding="utf-8",
-            )
+        browser.close()
 
-            page.screenshot(
-                path=str(self.output / "page.png"),
-                full_page=True,
-            )
-
-            soup = BeautifulSoup(
-                html,
-                "lxml",
-            )
-
-            meta = {
-                "title": page.title(),
-                "url": page.url,
-            }
-
-            canonical = soup.find(
-                "link",
-                rel="canonical",
-            )
-
-            if canonical:
-                meta["canonical"] = canonical.get(
-                    "href"
-                )
-
-            (self.output / "meta.json").write_text(
-                json.dumps(
-                    meta,
-                    indent=4,
-                    ensure_ascii=False,
-                ),
-                encoding="utf-8",
-            )
-
-            jsonld_dir = self.output / "jsonld"
-
-            jsonld_dir.mkdir(
-                exist_ok=True,
-            )
-
-            count = 0
-
-            for script in soup.find_all(
-                "script",
-                attrs={
-                    "type": "application/ld+json",
-                },
-            ):
-
-                if not script.string:
-                    continue
-
-                try:
-
-                    data = json.loads(
-                        script.string,
-                    )
-
-                except Exception:
-                    continue
-
-                count += 1
-
-                (
-                    jsonld_dir
-                    / f"{count}.json"
-                ).write_text(
-                    json.dumps(
-                        data,
-                        indent=4,
-                        ensure_ascii=False,
-                    ),
-                    encoding="utf-8",
-                )
-
-            browser.close()
-
-        print("Playwright analysis completed.")
-        print(self.output)
-
-
-def main():
-
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("url")
-
-    args = parser.parse_args()
-
-    PlaywrightAnalyzer(
-        args.url,
-    ).run()
-
-
-if __name__ == "__main__":
-    main()
+    return report
