@@ -1,111 +1,44 @@
-from __future__ import annotations
-
 import json
-import re
-
 from bs4 import BeautifulSoup
 
 
-class PageParser:
-    def __init__(self, html: str):
-        self.html = html
-        self.soup = BeautifulSoup(html, "lxml")
+def analyze_dom(report):
 
-    def title(self) -> str | None:
-        if self.soup.title:
-            return self.soup.title.get_text(strip=True)
+    html = getattr(report, "rendered_html", None) or getattr(report, "html", "")
 
-        return None
+    soup = BeautifulSoup(html, "lxml")
 
-    def canonical(self) -> str | None:
-        tag = self.soup.find("link", rel="canonical")
+    # Title
+    if soup.title and soup.title.string:
+        report.title = soup.title.string.strip()
 
-        if tag:
-            return tag.get("href")
+    # Canonical
+    canonical = soup.find("link", rel="canonical")
+    report.canonical = canonical.get("href") if canonical else None
 
-        return None
+    # OpenGraph
+    report.opengraph = {}
 
-    def meta(self, name: str) -> str | None:
+    for meta in soup.find_all("meta", property=True):
+        prop = meta.get("property")
+        if prop.startswith("og:"):
+            report.opengraph[prop] = meta.get("content")
 
-        tag = self.soup.find(
-            "meta",
-            attrs={"name": name},
-        )
+    # JSON-LD
+    report.json_ld = []
 
-        if tag:
-            return tag.get("content")
+    for tag in soup.find_all("script", type="application/ld+json"):
+        try:
+            report.json_ld.append(json.loads(tag.string))
+        except Exception:
+            continue
 
-        tag = self.soup.find(
-            "meta",
-            attrs={"property": name},
-        )
+    # Script kaynakları
+    report.scripts = []
 
-        if tag:
-            return tag.get("content")
+    for script in soup.find_all("script"):
+        src = script.get("src")
+        if src:
+            report.scripts.append(src)
 
-        return None
-
-    def json_ld(self) -> list[dict]:
-
-        data = []
-
-        scripts = self.soup.find_all(
-            "script",
-            attrs={"type": "application/ld+json"},
-        )
-
-        for script in scripts:
-
-            if not script.string:
-                continue
-
-            try:
-                obj = json.loads(script.string)
-
-                if isinstance(obj, list):
-                    data.extend(obj)
-                else:
-                    data.append(obj)
-
-            except Exception:
-                pass
-
-        return data
-
-    def all_scripts(self) -> list[str]:
-
-        result = []
-
-        scripts = self.soup.find_all("script")
-
-        for script in scripts:
-
-            if script.string:
-
-                text = script.string.strip()
-
-                if text:
-                    result.append(text)
-
-        return result
-
-    def first_price(self) -> str | None:
-
-        patterns = [
-            r'"price"\s*:\s*"([^"]+)"',
-            r'"price"\s*:\s*([0-9.,]+)',
-            r'"salePrice"\s*:\s*"([^"]+)"',
-        ]
-
-        for pattern in patterns:
-
-            match = re.search(
-                pattern,
-                self.html,
-                flags=re.IGNORECASE,
-            )
-
-            if match:
-                return match.group(1)
-
-        return None
+    return report
