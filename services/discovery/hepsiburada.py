@@ -4,6 +4,7 @@ from urllib.parse import urljoin
 
 from services.discovery.base import Discovery
 from services.discovery.url_filter import filter_urls
+from services.discovery.playwright_discovery import PlaywrightDiscovery
 
 
 USER_AGENT = (
@@ -36,12 +37,17 @@ class HepsiburadaDiscovery(Discovery):
             "User-Agent": USER_AGENT,
         })
 
-        urls = []
+        playwright = PlaywrightDiscovery(USER_AGENT)
+
+        discovered = set()
 
         for seed in SEED_URLS:
 
             print(f"[DISCOVERY] {seed}")
 
+            urls = []
+
+            # Hızlı tarama
             try:
 
                 response = session.get(
@@ -51,22 +57,34 @@ class HepsiburadaDiscovery(Discovery):
 
                 response.raise_for_status()
 
+                soup = BeautifulSoup(response.text, "lxml")
+
+                for a in soup.find_all("a", href=True):
+
+                    href = urljoin(seed, a["href"])
+
+                    urls.append(href)
+
             except Exception as exc:
 
                 print(exc)
 
-                continue
+            urls = filter_urls(urls)
 
-            soup = BeautifulSoup(response.text, "lxml")
+            # Yetersizse Playwright
+            if len(urls) < 20:
 
-            for a in soup.find_all("a", href=True):
+                print("[DISCOVERY] Playwright fallback")
 
-                href = urljoin(seed, a["href"])
+                try:
+                    urls.extend(
+                        playwright.discover(seed)
+                    )
+                except Exception as exc:
+                    print(exc)
 
-                urls.append(href)
+            discovered.update(
+                filter_urls(urls)
+            )
 
-        urls = filter_urls(urls)
-
-        print(f"[DISCOVERY] {len(urls)} ürün URL'si bulundu")
-
-        return urls
+        return sorted(discovered)
