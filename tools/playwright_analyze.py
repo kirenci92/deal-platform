@@ -1,52 +1,52 @@
-from pathlib import Path
 from playwright.sync_api import sync_playwright
 
 
 def analyze_playwright(report):
 
-    output_dir = (
-        Path("analysis")
-        / report.store
-        / "temp"
-    )
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    screenshot_path = output_dir / "screenshot.png"
-    html_path = output_dir / "page.html"
+    requests = []
+    responses = []
 
     with sync_playwright() as p:
 
-        browser = p.chromium.launch(
-            headless=True
-        )
+        browser = p.chromium.launch(headless=True)
 
         page = browser.new_page()
+
+        def on_request(request):
+            requests.append({
+                "method": request.method,
+                "url": request.url,
+                "resource_type": request.resource_type,
+            })
+
+        def on_response(response):
+            try:
+                content_type = response.headers.get("content-type", "")
+            except Exception:
+                content_type = ""
+
+            responses.append({
+                "url": response.url,
+                "status": response.status,
+                "content_type": content_type,
+            })
+
+        page.on("request", on_request)
+        page.on("response", on_response)
 
         page.goto(
             report.url,
             wait_until="networkidle",
-            timeout=60000
+            timeout=60000,
         )
 
-        page.screenshot(
-            path=str(screenshot_path),
-            full_page=True
-        )
-
-        html = page.content()
-
-        html_path.write_text(
-            html,
-            encoding="utf-8"
-        )
-
-        report.rendered_html = html
-
-        report.html_path = str(html_path)
-
-        report.screenshot_path = str(screenshot_path)
+        report.rendered_html = page.content()
 
         browser.close()
+
+    report.network = {
+        "requests": requests,
+        "responses": responses,
+    }
 
     return report
