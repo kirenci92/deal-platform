@@ -1,66 +1,115 @@
-import argparse
+import json
 
-from tools.schema import AnalysisReport
-from tools.http import analyze_http
-from tools.playwright_analyze import analyze_playwright
-from tools.network_parser import analyze_network
-from tools.parser import analyze_dom
-from tools.jsonld_parser import analyze_jsonld
-from tools.diagnostics import analyze_diagnostics
-from tools.reporter import save_report
+import requests
+from bs4 import BeautifulSoup
 
 
-class AnatomyAnalyzer:
+DEFAULT_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (X11; Linux x86_64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/139.0 Safari/537.36"
+    )
+}
 
-    def __init__(self, store: str, url: str):
-        self.report = AnalysisReport(
-            store=store,
-            url=url,
+
+# İleride Discovery, Analyzer ve Scraper aynı session'ı kullanacak.
+SESSION = requests.Session()
+SESSION.headers.update(DEFAULT_HEADERS)
+
+
+def analyze_http(report):
+
+    response = SESSION.get(
+        report.url,
+        timeout=30,
+        allow_redirects=True,
+    )
+
+    response.raise_for_status()
+
+    # Yanlış charset dönen siteler için
+    response.encoding = response.apparent_encoding
+
+    report.status_code = response.status_code
+    report.final_url = response.url
+    report.response_time = response.elapsed.total_seconds()
+
+    report.headers = dict(response.headers)
+
+    report.cookies = {
+        cookie.name: cookie.value
+        for cookie in response.cookies
+    }
+
+    report.html = response.text
+
+    soup = BeautifulSoup(report.html, "lxml")
+
+    # Sayfa başlığı
+    report.title = (
+        soup.title.string.strip()
+        if soup.title and soup.title.string
+        else None
+    )
+
+    # Meta etiketleri
+    report.meta = {}
+
+    # OpenGraph etiketleri
+    report.opengraph = {}
+
+    for meta in soup.find_all("meta"):
+
+        key = (
+            meta.get("name")
+            or meta.get("property")
+            or meta.get("http-equiv")
         )
 
-    def run(self):
+        value = meta.get("content")
 
-        print("[1/7] HTTP")
-        analyze_http(self.report)
+        if not key or not value:
+            continue
 
-        print("[2/7] Playwright")
-        analyze_playwright(self.report)
+        if key.lower().startswith("og:"):
+            report.opengraph[key] = value
+        else:
+            report.meta[key] = value
 
-        print("[3/7] Network")
-        analyze_network(self.report)
+    # Canonical URL
+    canonical = soup.find(
+        "link",
+        rel=lambda value: value and "canonical" in value.lower(),
+    )
 
-        print("[4/7] DOM")
-        analyze_dom(self.report)
+    report.canonical = (
+        canonical.get("href")
+        if canonical
+        else None
+    )
 
-        print("[5/7] JSON-LD")
-        analyze_jsonld(self.report)
+    # JSON-LD verileri
+    report.json_ld = []
 
-        print("[6/7] Diagnostics")
-        analyze_diagnostics(self.report)
+    for script in soup.find_all(
+        "script",
+        type="application/ld+json",
+    ):
 
-        print("[7/7] Reporter")
-        save_report(self.report)
+        if not script.string:
+            continue
 
-        print("✓ Done")
+        try:
 
-        return self.report
+            report.json_ld.append(
+                json.loads(script.string)
+            )
 
+        except Exception:
 
-def analyze(store: str, url: str):
-    return AnatomyAnalyzer(store, url).run()
+            # Bazı siteler geçersiz JSON döndürüyor.
+            continue
 
-
-def main():
-
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--store", required=True)
-    parser.add_argument("--url", required=True)
-
-    args = parser.parse_args()
-
-    analyze(args.store, args.url)
-
-
-if __name__ == "__main__":
-    main()
+    return report
