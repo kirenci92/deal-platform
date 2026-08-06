@@ -2,18 +2,37 @@ from typing import Any, Dict, List
 
 
 def _as_list(data: Any) -> List[Dict]:
+    """
+    JSON-LD farklı formatlarda gelebilir:
+
+    - {}
+    - []
+    - {"@graph": [...]}
+
+    Hepsini ortak liste formatına dönüştürür.
+    """
+
     if isinstance(data, list):
-        return [x for x in data if isinstance(x, dict)]
+        return [item for item in data if isinstance(item, dict)]
+
     if isinstance(data, dict):
-        if "@graph" in data and isinstance(data["@graph"], list):
-            return [x for x in data["@graph"] if isinstance(x, dict)]
+
+        graph = data.get("@graph")
+
+        if isinstance(graph, list):
+            return [item for item in graph if isinstance(item, dict)]
+
         return [data]
+
     return []
 
 
 def analyze_jsonld(report):
 
     report.product_jsonld = {}
+
+    if not getattr(report, "json_ld", None):
+        return report
 
     for document in report.json_ld:
 
@@ -34,30 +53,35 @@ def analyze_jsonld(report):
             if isinstance(offers, list):
                 offers = offers[0] if offers else {}
 
+            aggregate = node.get("aggregateRating", {})
+
+            if not isinstance(aggregate, dict):
+                aggregate = {}
+
+            brand = node.get("brand")
+
+            if isinstance(brand, dict):
+                brand = brand.get("name")
+
             report.product_jsonld = {
                 "name": node.get("name"),
-                "brand": (
-                    node.get("brand", {}).get("name")
-                    if isinstance(node.get("brand"), dict)
-                    else node.get("brand")
-                ),
+                "brand": brand,
                 "sku": node.get("sku"),
-                "image": node.get("image"),
+                "gtin": node.get("gtin"),
+                "mpn": node.get("mpn"),
                 "description": node.get("description"),
+                "image": node.get("image"),
+                "url": node.get("url"),
                 "price": offers.get("price"),
                 "currency": offers.get("priceCurrency"),
                 "availability": offers.get("availability"),
-                "url": node.get("url"),
-                "rating": (
-                    node.get("aggregateRating", {}).get("ratingValue")
-                    if isinstance(node.get("aggregateRating"), dict)
+                "seller": (
+                    offers.get("seller", {}).get("name")
+                    if isinstance(offers.get("seller"), dict)
                     else None
                 ),
-                "review_count": (
-                    node.get("aggregateRating", {}).get("reviewCount")
-                    if isinstance(node.get("aggregateRating"), dict)
-                    else None
-                ),
+                "rating": aggregate.get("ratingValue"),
+                "review_count": aggregate.get("reviewCount"),
             }
 
             return report
