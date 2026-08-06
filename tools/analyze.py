@@ -1,103 +1,65 @@
-"""
-Analyzer CLI skeleton for Deal Platform.
-
-This file is a complete command-line entry point that:
-- accepts --store and --url
-- downloads HTML
-- extracts meta, OpenGraph, canonical, JSON-LD and scripts
-- writes report.json and report.md
-
-Playwright and network capture are left as extension points if Playwright
-is installed in the environment.
-"""
-
 import argparse
-import json
-from pathlib import Path
 
-import requests
-from bs4 import BeautifulSoup
-
-
-def analyze(url: str):
-    r = requests.get(url, timeout=30, headers={
-        "User-Agent": "Mozilla/5.0"
-    })
-    r.raise_for_status()
-
-    soup = BeautifulSoup(r.text, "lxml")
-
-    meta = {m.get("name") or m.get("property"): m.get("content")
-            for m in soup.find_all("meta")
-            if m.get("content")}
-
-    og = {k: v for k, v in meta.items() if k and k.startswith("og:")}
-
-    canonical = None
-    c = soup.find("link", rel="canonical")
-    if c:
-        canonical = c.get("href")
-
-    json_ld = []
-    for s in soup.find_all("script", type="application/ld+json"):
-        if not s.string:
-            continue
-        try:
-            json_ld.append(json.loads(s.string))
-        except Exception:
-            pass
-
-    scripts = [x.get("src") for x in soup.find_all("script") if x.get("src")]
-
-    return {
-        "url": url,
-        "canonical": canonical,
-        "meta": meta,
-        "opengraph": og,
-        "json_ld": json_ld,
-        "scripts": scripts,
-        "html_file": "page.html",
-        "network": [],
-    }, r.text
+from tools.schema import AnalysisReport
+from tools.http_client import analyze_http
+from tools.playwright_analyze import analyze_playwright
+from tools.network_parser import analyze_network
+from tools.parser import analyze_dom
+from tools.jsonld_parser import analyze_jsonld
+from tools.diagnostics import analyze_diagnostics
+from tools.reporter import save_report
 
 
-def write_reports(report, html):
-    Path("page.html").write_text(html, encoding="utf-8")
+class AnatomyAnalyzer:
 
-    Path("report.json").write_text(
-        json.dumps(report, indent=2, ensure_ascii=False),
-        encoding="utf-8",
-    )
+    def __init__(self, store: str, url: str):
+        self.report = AnalysisReport(
+            store=store,
+            url=url,
+        )
 
-    md = [
-        "# Analyzer Report",
-        "",
-        f"URL: {report['url']}",
-        "",
-        f"Canonical: {report['canonical']}",
-        "",
-        f"JSON-LD blocks: {len(report['json_ld'])}",
-        f"Scripts: {len(report['scripts'])}",
-    ]
-    Path("report.md").write_text("\n".join(md), encoding="utf-8")
+    def run(self):
+
+        print("[1/7] HTTP")
+        analyze_http(self.report)
+
+        print("[2/7] Playwright")
+        analyze_playwright(self.report)
+
+        print("[3/7] Network")
+        analyze_network(self.report)
+
+        print("[4/7] DOM")
+        analyze_dom(self.report)
+
+        print("[5/7] JSON-LD")
+        analyze_jsonld(self.report)
+
+        print("[6/7] Diagnostics")
+        analyze_diagnostics(self.report)
+
+        print("[7/7] Reporter")
+        save_report(self.report)
+
+        print("✓ Done")
+
+        return self.report
+
+
+def analyze(store: str, url: str):
+    return AnatomyAnalyzer(store, url).run()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Deal Platform Analyzer")
+
+    parser = argparse.ArgumentParser()
+
     parser.add_argument("--store", required=True)
     parser.add_argument("--url", required=True)
 
     args = parser.parse_args()
 
-    report, html = analyze(args.url)
-    report["store"] = args.store
-    write_reports(report, html)
-
-    print("Done.")
-    print("Generated:")
-    print(" - page.html")
-    print(" - report.json")
-    print(" - report.md")
+    analyze(args.store, args.url)
 
 
 if __name__ == "__main__":
