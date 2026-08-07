@@ -1,14 +1,26 @@
 import re
+from urllib.parse import urljoin
+
 from bs4 import BeautifulSoup
 
 
-PRICE_RE = re.compile(r"(\d[\d\.\,]*)\s*(₺|TL|TRY)", re.IGNORECASE)
+PRICE_RE = re.compile(
+    r"(\d[\d\.\,]*)\s*(₺|TL|TRY)",
+    re.IGNORECASE,
+)
 
 
 def _text(node):
+
     if not node:
         return ""
-    return " ".join(node.get_text(" ", strip=True).split())
+
+    return " ".join(
+        node.get_text(
+            " ",
+            strip=True,
+        ).split()
+    )
 
 
 def _score(node):
@@ -36,22 +48,59 @@ def _score(node):
     return score
 
 
+def _selector(node):
+
+    if node.get("id"):
+        return f"#{node.get('id')}"
+
+    classes = node.get("class", [])
+
+    if classes:
+        return (
+            node.name
+            + "."
+            + ".".join(classes[:3])
+        )
+
+    return node.name
+
+
 def analyze_dom(report):
 
-    html = getattr(report, "rendered_html", None) or getattr(report, "html", "")
+    html = (
+        getattr(report, "rendered_html", None)
+        or getattr(report, "html", "")
+    )
 
-    soup = BeautifulSoup(html, "lxml")
+    soup = BeautifulSoup(
+        html,
+        "lxml",
+    )
 
     candidates = []
 
-    for node in soup.find_all(["article", "div", "li"]):
+    for node in soup.find_all(
+        [
+            "article",
+            "div",
+            "li",
+        ]
+    ):
 
         score = _score(node)
 
         if score >= 40:
-            candidates.append((score, node))
+            candidates.append(
+                (
+                    score,
+                    node,
+                )
+            )
 
-    candidates.sort(key=lambda x: x[0], reverse=True)
+    candidates.sort(
+        key=lambda x: x[0],
+        reverse=True,
+    )
 
     report.selector_candidates = []
 
@@ -62,17 +111,29 @@ def analyze_dom(report):
 
     report.selector_candidates = [
         {
-            "tag": n.name,
-            "class": n.get("class", []),
-            "id": n.get("id"),
-            "score": s,
+            "tag": node.name,
+            "id": node.get("id"),
+            "class": node.get(
+                "class",
+                [],
+            ),
+            "selector": _selector(node),
+            "score": score,
         }
-        for s, n in candidates[:20]
+        for score, node in candidates[:20]
     ]
 
     title = ""
 
-    for tag in best.find_all(["h1", "h2", "h3", "span", "a"]):
+    for tag in best.find_all(
+        [
+            "h1",
+            "h2",
+            "h3",
+            "span",
+            "a",
+        ]
+    ):
 
         value = _text(tag)
 
@@ -81,15 +142,49 @@ def analyze_dom(report):
 
     image = best.find("img")
 
-    link = best.find("a", href=True)
+    image_url = None
 
-    prices = PRICE_RE.findall(_text(best))
+    if image:
+
+        image_url = (
+            image.get("src")
+            or image.get("data-src")
+            or image.get("data-original")
+        )
+
+    if image_url:
+        image_url = urljoin(
+            report.final_url or report.url,
+            image_url,
+        )
+
+    link = best.find(
+        "a",
+        href=True,
+    )
+
+    product_url = None
+
+    if link:
+
+        product_url = urljoin(
+            report.final_url or report.url,
+            link["href"],
+        )
+
+    prices = PRICE_RE.findall(
+        _text(best)
+    )
 
     report.product_candidate = {
         "title": title,
-        "price": prices[0][0] if prices else None,
-        "image": image.get("src") if image else None,
-        "link": link.get("href") if link else None,
+        "price": (
+            prices[0][0]
+            if prices
+            else None
+        ),
+        "image": image_url,
+        "link": product_url,
     }
 
     return report
