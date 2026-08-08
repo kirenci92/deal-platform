@@ -1,66 +1,66 @@
-import argparse
+from __future__ import annotations
+
+import time
+import requests
 
 from tools.schema import AnalysisReport
-from tools.http_client import analyze_http
-from tools.playwright_analyze import analyze_playwright
-from tools.network_parser import analyze_network
-from tools.parser import analyze_dom
-from tools.jsonld_parser import analyze_jsonld
-from tools.diagnostics import analyze_diagnostics
-from tools.reporter import save_report
 
 
-class AnatomyAnalyzer:
+class HttpClient:
 
-    def __init__(self, store: str, url: str):
-        self.report = AnalysisReport(
-            store=store,
-            url=url,
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 "
+        "(KHTML, like Gecko) "
+        "Chrome/139.0 Safari/537.36"
+    )
+
+    @classmethod
+    def get(cls, url: str) -> requests.Response:
+
+        response = requests.get(
+            url,
+            headers={
+                "User-Agent": cls.USER_AGENT,
+            },
+            timeout=20,
         )
 
-    def run(self):
+        response.raise_for_status()
 
-        print("[1/7] HTTP")
-        analyze_http(self.report)
-
-        print("[2/7] Playwright")
-        analyze_playwright(self.report)
-
-        print("[3/7] Network")
-        analyze_network(self.report)
-
-        print("[4/7] DOM")
-        analyze_dom(self.report)
-
-        print("[5/7] JSON-LD")
-        analyze_jsonld(self.report)
-
-        print("[6/7] Diagnostics")
-        analyze_diagnostics(self.report)
-
-        print("[7/7] Reporter")
-        save_report(self.report)
-
-        print("✓ Done")
-
-        return self.report
+        return response
 
 
-def analyze(store: str, url: str):
-    return AnatomyAnalyzer(store, url).run()
+def analyze_http(report: AnalysisReport):
 
+    start = time.perf_counter()
 
-def main():
+    try:
+        response = HttpClient.get(report.url)
 
-    parser = argparse.ArgumentParser()
+        report.status_code = response.status_code
+        report.final_url = response.url
+        report.response_time = time.perf_counter() - start
 
-    parser.add_argument("--store", required=True)
-    parser.add_argument("--url", required=True)
+        report.headers = dict(response.headers)
+        report.cookies = response.cookies.get_dict()
+        report.html = response.text
 
-    args = parser.parse_args()
+    except requests.RequestException as exc:
 
-    analyze(args.store, args.url)
+        report.response_time = time.perf_counter() - start
 
+        if exc.response is not None:
+            report.status_code = exc.response.status_code
+            report.final_url = exc.response.url
+            report.headers = dict(exc.response.headers)
+            report.cookies = exc.response.cookies.get_dict()
+            report.html = exc.response.text
 
-if __name__ == "__main__":
-    main()
+        report.notes.append(f"HTTP error: {exc}")
+
+    except Exception as exc:
+
+        report.notes.append(f"HTTP unexpected error: {exc}")
+
+    return report
