@@ -1,4 +1,3 @@
-<<'PY'
 from __future__ import annotations
 
 import json
@@ -319,4 +318,3 @@ class Trendyol(BaseSource):
 
 
 __all__ = ["Trendyol"]
-PY
