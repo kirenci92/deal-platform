@@ -1,4 +1,4 @@
-cd /opt/deal-platform && cat > sources/trendyol.py <<'PY'
+<<'PY'
 from __future__ import annotations
 
 import json
