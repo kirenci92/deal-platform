@@ -29,7 +29,8 @@ class Trendyol(BaseSource):
                 "User-Agent": self.USER_AGENT,
                 "Accept": (
                     "text/html,application/xhtml+xml,"
-                    "application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+                    "application/xml;q=0.9,image/avif,image/webp,"
+                    "*/*;q=0.8"
                 ),
                 "Accept-Language": "tr-TR,tr;q=0.9,en;q=0.8",
             },
@@ -57,7 +58,6 @@ class Trendyol(BaseSource):
             return float(value)
 
         text = str(value).strip()
-
         text = re.sub(r"[^\d,.\-]", "", text)
 
         if not text:
@@ -100,7 +100,8 @@ class Trendyol(BaseSource):
 
             elif isinstance(parsed, list):
                 data.extend(
-                    item for item in parsed
+                    item
+                    for item in parsed
                     if isinstance(item, dict)
                 )
 
@@ -116,7 +117,10 @@ class Trendyol(BaseSource):
             if item_type == "Product":
                 return item
 
-            if isinstance(item_type, list) and "Product" in item_type:
+            if (
+                isinstance(item_type, list)
+                and "Product" in item_type
+            ):
                 return item
 
             graph = item.get("@graph")
@@ -143,45 +147,151 @@ class Trendyol(BaseSource):
     def _extract_discount(
         product: dict[str, Any],
         soup: BeautifulSoup,
-    ) -> float | None:
+    ) -> int | None:
         offers = product.get("offers")
 
         if isinstance(offers, dict):
-            current = Trendyol._price(offers.get("price"))
-            old = Trendyol._price(
-                offers.get("highPrice")
-                or offers.get("priceSpecification", {}).get(
-                    "price"
-                )
-                if isinstance(
-                    offers.get("priceSpecification"),
-                    dict,
-                )
-                else None
+            current = Trendyol._price(
+                offers.get("price")
             )
 
-            if current is not None and old is not None and old > current:
-                return round((old - current) / old * 100, 2)
+            price_specification = offers.get(
+                "priceSpecification"
+            )
+
+            specification_price = None
+
+            if isinstance(price_specification, dict):
+                specification_price = Trendyol._price(
+                    price_specification.get("price")
+                )
+
+            high_price = Trendyol._price(
+                offers.get("highPrice")
+            )
+
+            old = high_price or specification_price
+
+            if (
+                current is not None
+                and old is not None
+                and old > current
+            ):
+                return round(
+                    (old - current) / old * 100
+                )
 
         # Analyzer'da görülen indirim metinlerinden fallback.
         text = soup.get_text(" ", strip=True)
 
         match = re.search(
-            r"%\s*(\d{1,3}(?:[.,]\d+)?)\s*(?:indirim|off)?",
+            r"%\s*(\d{1,3}(?:[.,]\d+)?)"
+            r"\s*(?:indirim|off)?",
             text,
             re.IGNORECASE,
         )
 
         if match:
             try:
-                return float(match.group(1).replace(",", "."))
+                return round(
+                    float(
+                        match.group(1).replace(",", ".")
+                    )
+                )
             except ValueError:
                 pass
 
         return None
 
-    def extract(self, candidate: Candidate) -> Deal | None:
-        url = self._clean(getattr(candidate, "url", None))
+    @staticmethod
+    def _extract_product_id(
+        product: dict[str, Any],
+    ) -> str | None:
+        return (
+            Trendyol._clean(product.get("sku"))
+            or Trendyol._clean(product.get("mpn"))
+        )
+
+    @staticmethod
+    def _extract_seller(
+        offers: dict[str, Any] | None,
+    ) -> str | None:
+        if not isinstance(offers, dict):
+            return None
+
+        seller = offers.get("seller")
+
+        if isinstance(seller, dict):
+            return Trendyol._clean(
+                seller.get("name")
+            )
+
+        return Trendyol._clean(seller)
+
+    @staticmethod
+    def _extract_stock(
+        offers: dict[str, Any] | None,
+    ) -> bool:
+        if not isinstance(offers, dict):
+            return True
+
+        availability = Trendyol._clean(
+            offers.get("availability")
+        )
+
+        if not availability:
+            return True
+
+        availability = availability.lower()
+
+        if "outofstock" in availability:
+            return False
+
+        if "soldout" in availability:
+            return False
+
+        if "instock" in availability:
+            return True
+
+        return True
+
+    @staticmethod
+    def _discovered_at(
+        candidate: Candidate,
+    ) -> datetime:
+        value = getattr(
+            candidate,
+            "discovered_at",
+            None,
+        )
+
+        if isinstance(value, datetime):
+            return value
+
+        if isinstance(value, str) and value.strip():
+            try:
+                parsed = datetime.fromisoformat(
+                    value.replace("Z", "+00:00")
+                )
+
+                if parsed.tzinfo is None:
+                    return parsed.replace(
+                        tzinfo=timezone.utc
+                    )
+
+                return parsed
+            except ValueError:
+                pass
+
+        return datetime.now(timezone.utc)
+
+    def extract(
+        self,
+        candidate: Candidate,
+    ) -> Deal | None:
+        url = self._clean(
+            getattr(candidate, "merchant_url", None)
+        )
 
         if not url:
             return None
@@ -191,10 +301,15 @@ class Trendyol(BaseSource):
         except requests.RequestException:
             return None
 
-        soup = BeautifulSoup(response.text, "lxml")
+        soup = BeautifulSoup(
+            response.text,
+            "lxml",
+        )
 
         jsonld_items = self._jsonld(soup)
-        product = self._find_product_jsonld(jsonld_items)
+        product = self._find_product_jsonld(
+            jsonld_items
+        )
 
         title: str | None = None
         image: str | None = None
@@ -202,40 +317,95 @@ class Trendyol(BaseSource):
         price: float | None = None
         old_price: float | None = None
         description: str | None = None
+        product_id: str | None = None
+        seller: str | None = None
+        in_stock = True
+
+        offers: dict[str, Any] | None = None
 
         if product:
-            title = self._clean(product.get("name"))
+            title = self._clean(
+                product.get("name")
+            )
+
             image_value = product.get("image")
 
             if isinstance(image_value, list):
-                image = self._clean(image_value[0]) if image_value else None
+                image = (
+                    self._clean(image_value[0])
+                    if image_value
+                    else None
+                )
             else:
                 image = self._clean(image_value)
 
-            description = self._clean(product.get("description"))
+            description = self._clean(
+                product.get("description")
+            )
 
             brand_value = product.get("brand")
 
             if isinstance(brand_value, dict):
-                brand = self._clean(brand_value.get("name"))
+                brand = self._clean(
+                    brand_value.get("name")
+                )
             else:
                 brand = self._clean(brand_value)
 
-            offers = product.get("offers")
+            product_id = self._extract_product_id(
+                product
+            )
 
-            if isinstance(offers, dict):
-                price = self._price(offers.get("price"))
+            product_offers = product.get("offers")
+
+            if isinstance(product_offers, dict):
+                offers = product_offers
+
+                price = self._price(
+                    offers.get("price")
+                )
 
                 high_price = self._price(
                     offers.get("highPrice")
                 )
 
-                if (
-                    high_price is not None
-                    and price is not None
-                    and high_price > price
+                price_specification = offers.get(
+                    "priceSpecification"
+                )
+
+                specification_price = None
+
+                if isinstance(
+                    price_specification,
+                    dict,
                 ):
-                    old_price = high_price
+                    specification_price = (
+                        self._price(
+                            price_specification.get(
+                                "price"
+                            )
+                        )
+                    )
+
+                old_candidate = (
+                    high_price
+                    or specification_price
+                )
+
+                if (
+                    old_candidate is not None
+                    and price is not None
+                    and old_candidate > price
+                ):
+                    old_price = old_candidate
+
+                seller = self._extract_seller(
+                    offers
+                )
+
+                in_stock = self._extract_stock(
+                    offers
+                )
 
         # JSON-LD bulunamazsa DOM fallback.
         if not title:
@@ -243,24 +413,33 @@ class Trendyol(BaseSource):
                 "meta",
                 attrs={"property": "og:title"},
             )
+
             if meta:
-                title = self._clean(meta.get("content"))
+                title = self._clean(
+                    meta.get("content")
+                )
 
         if not image:
             meta = soup.find(
                 "meta",
                 attrs={"property": "og:image"},
             )
+
             if meta:
-                image = self._clean(meta.get("content"))
+                image = self._clean(
+                    meta.get("content")
+                )
 
         if not description:
             meta = soup.find(
                 "meta",
                 attrs={"name": "description"},
             )
+
             if meta:
-                description = self._clean(meta.get("content"))
+                description = self._clean(
+                    meta.get("content")
+                )
 
         if price is None:
             price_selectors = [
@@ -275,7 +454,10 @@ class Trendyol(BaseSource):
 
                 if element:
                     price = self._price(
-                        element.get_text(" ", strip=True)
+                        element.get_text(
+                            " ",
+                            strip=True,
+                        )
                     )
 
                     if price is not None:
@@ -284,33 +466,56 @@ class Trendyol(BaseSource):
         if not title or price is None:
             return None
 
-        discount = self._extract_discount(product or {}, soup)
+        discount = self._extract_discount(
+            product or {},
+            soup,
+        )
 
         if old_price is None and discount and discount > 0:
+            calculated_old_price = price / (
+                1 - discount / 100
+            )
+
             old_price = round(
-                price / (1 - discount / 100),
+                calculated_old_price,
                 2,
             )
 
-        deal_id = (
-            self._clean(getattr(candidate, "id", None))
-            or url
+        retailer = (
+            self._clean(
+                getattr(candidate, "retailer", None)
+            )
+            or self.name
+        )
+
+        discovery_source = self._clean(
+            getattr(
+                candidate,
+                "discovery_source",
+                None,
+            )
         )
 
         return Deal(
-            id=deal_id,
             title=title,
-            merchant="Trendyol",
+            product_url=url,
+            retailer=retailer,
             price=price,
             old_price=old_price,
             discount=discount,
             coupon=None,
-            image=image,
-            category=None,
+            image_url=image,
             brand=brand,
-            link=url,
-            date=datetime.now(timezone.utc),
-            description=description,
+            category=None,
+            seller=seller,
+            in_stock=in_stock,
+            stock_count=None,
+            product_id=product_id,
+            fingerprint=None,
+            discovery_source=discovery_source,
+            discovered_at=self._discovered_at(
+                candidate
+            ),
         )
 
     def get_deals(self) -> list[Deal]:
